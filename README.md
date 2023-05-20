@@ -1,2 +1,5 @@
-# atypic-cardio-analyzer
-Library created to analyse atypical cardiomyocyte action potential
+# General functionality
+TODO
+
+# Authors
+TODO
