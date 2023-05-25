@@ -1,0 +1,6 @@
+numpy
+pandas
+dask
+openpyxl
+scipy
+scikit-image

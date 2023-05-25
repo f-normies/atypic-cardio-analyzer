@@ -15,11 +15,16 @@ from scipy.ndimage import gaussian_filter
 from skimage.restoration import denoise_tv_chambolle
 from math import sqrt
 
-def open_txt(file, separator='\t', decimal=',', header=None):
+def open_txt(file, separator='\t', header=None):
     column_names = ['time', 'voltage']
     column_types = {'time': np.float64, 'voltage': np.float64}
     
-    data = dd.read_csv(file, sep=separator, decimal=decimal, encoding='latin-1', 
+    try:
+        data = dd.read_csv(file, engine='c', decimal=',', sep=separator, encoding='latin-1', 
+                       on_bad_lines='skip', header=header, names=column_names,
+                       dtype=column_types)
+    except ValueError:
+        data = dd.read_csv(file, engine='c', decimal='.', sep=separator, encoding='latin-1', 
                        on_bad_lines='skip', header=header, names=column_names,
                        dtype=column_types)
 
@@ -29,12 +34,11 @@ def open_txt(file, separator='\t', decimal=',', header=None):
 
     return time, voltage
 
-def preprocess(file, weight=15, sigma=1):
+def preprocess(file, step=1, sigma=5):
     time, voltage = open_txt(file)
 
-    time = time * 1000
-    voltage = voltage * 1000
-    voltage = denoise_tv_chambolle(voltage, weight=weight)
+    time = time[::step] * 1000
+    voltage = voltage[::step] * 1000
     voltage = gaussian_filter(voltage, sigma=sigma)
 
     return time, voltage
@@ -97,7 +101,7 @@ def find_voltage_speed(ap, time, voltage):
 
     return 1000 * np.mean(phase_4_speed), np.mean(phase_0_speed)
 
-def circle(time, voltage):
+def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
         dist = np.sqrt((items_x - value_x) ** 2 + (items_y - value_y) ** 2)
         return np.argmin(dist)
@@ -124,6 +128,9 @@ def circle(time, voltage):
     x = np.array(time)
     y = np.array(voltage)
 
+    x = x[:np.argmax(y)]
+    y = y[:np.argmax(y)]
+
     l = 8
     dff = flat(x, y, l)
     ma = nearest_value(dff[0], dff[1], x[np.argmax(y)], np.min(y))
@@ -147,6 +154,13 @@ def circle(time, voltage):
         ma = nearest_value(dff[0], dff[1], x[np.argmax(y)], np.min(y))
 
     rad, x_r, y_r = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o], dff[1][ma - o])
+    k = 0
+    while rad > avr_rad:
+        k+=1
+        ma -= 10
+        rad, x_r, y_r = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o], dff[1][ma - o])
+        if k > 10:
+            break
     return rad, x_r, y_r
 
 def save_aps_to_txt(destination, aps, time, voltage):
