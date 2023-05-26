@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="atypic_cardio_analyzer",
-    version="0.2.3",
+    version="0.2.4",
     description='Library created to analyse atypical cardiomyocyte action potential',
     author='Oleg Zakharov, Aleksei Aredov, Ilya Polusmak',
     author_email='os.zakharov.04@gmail.com',

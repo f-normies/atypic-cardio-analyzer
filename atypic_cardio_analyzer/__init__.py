@@ -101,7 +101,10 @@ def find_voltage_speed(ap, time, voltage):
     phase_0_voltage = voltage[start_index:peak_index]
     phase_0_speed = np.diff(phase_0_voltage) / np.diff(phase_0_time)
 
-    return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
+    try:
+        return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
+    except:
+        return 0.0, 0.0
 
 def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
