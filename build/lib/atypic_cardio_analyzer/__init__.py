@@ -100,11 +100,8 @@ def find_voltage_speed(ap, time, voltage):
     phase_0_time = time[start_index:peak_index]
     phase_0_voltage = voltage[start_index:peak_index]
     phase_0_speed = np.diff(phase_0_voltage) / np.diff(phase_0_time)
-    
-    try:
-        return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
-    except:
-        return 0.0, 0.0
+
+    return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
 
 def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
@@ -196,24 +193,38 @@ def save_aps_to_txt(destination, aps, time, voltage):
 
     return time_intervals
 
-def save_aps_to_xlsx(destination, aps, time, voltage):
+def save_aps_to_xlsx(destination, aps, time, voltage, limit_rad=1000):
     data = []
+    radius_list_local = []
+    phase_4_speed_list_local = []
+    phase_0_speed_list_local = []
 
     for number, ap in enumerate(aps):
         phase_4_speed, phase_0_speed = find_voltage_speed(ap, time, voltage)
 
+        if math.isnan(phase_4_speed):
+            phase_4_speed = replace_nan_with_nearest(phase_4_speed_list_local, number)
+        if math.isnan(phase_0_speed):
+            phase_0_speed = replace_nan_with_nearest(phase_0_speed_list_local, number)
+
         current_ap_time = time[ap['pre_start']:ap['end']]
         current_ap_voltage = voltage[ap['pre_start']:ap['end']]
 
-        radius, _, _ = circle(current_ap_time, current_ap_voltage)
+        radius, x, y = circle(current_ap_time, current_ap_voltage, limit_rad)
+
+        if math.isnan(radius):
+            radius = replace_nan_with_nearest(radius_list_local, number)
+
+        radius_list_local.append(radius)
+
 
         row = {
             "Номер ПД": number + 1,
             "Начало": f"{current_ap_time[0]:.2f}",
             "Конец": f"{current_ap_time[-1]:.2f}",
             "Радиус": round(radius, 2),
-            "dV/dt4": phase_4_speed,
-            "dV/dt0": phase_0_speed
+            "dV/dt4": round(phase_4_speed, 3),
+            "dV/dt0": round(phase_0_speed, 3)
         }
         data.append(row)
 
