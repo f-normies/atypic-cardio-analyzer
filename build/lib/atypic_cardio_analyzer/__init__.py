@@ -160,13 +160,21 @@ def circle(time, voltage, avr_rad=1000):
 
     rad, x_r, y_r = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o], dff[1][ma - o])
     k = 0
-    while rad > avr_rad:
-        k+=1
-        ma -= 10
-        rad, x_r, y_r = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o], dff[1][ma - o])
-        if k > 10:
-            break
-    return rad, x_r, y_r
+    try:
+        while rad > avr_rad:
+            k += 1
+            ma -= 5
+            rad_new, x_r_new, y_r_new = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o],
+                                               dff[1][ma - o])
+            if k > 100:
+                break
+        if rad_new < rad:
+            return rad_new, x_r_new, y_r_new
+        else:
+            return rad, x_r, y_r
+
+    except Exception as e:
+        return rad, x_r, y_r
 
 def save_aps_to_txt(destination, aps, time, voltage):
     if os.path.exists(destination):
