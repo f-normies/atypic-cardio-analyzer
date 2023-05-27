@@ -119,21 +119,23 @@ def find_voltage_speed(ap, time, voltage):
 
     phase_4_time = time[prestart_index:start_index]
     phase_4_voltage = voltage[prestart_index:start_index]
+    phase_4_speed = np.diff(phase_4_voltage)/np.diff(phase_4_time)
 
-    if (len(phase_4_time) < 5):
-        raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
+    # if (len(phase_4_time) < 5):
+    #     raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
 
-    phase_4_speed = max_slope(phase_4_time, phase_4_voltage)
+    # phase_4_speed = max_slope(phase_4_time, phase_4_voltage)
 
     phase_0_time = time[start_index:peak_index]
     phase_0_voltage = voltage[start_index:peak_index]
+    phase_0_speed = np.diff(phase_0_voltage)/np.diff(phase_0_time)
 
-    if (len(phase_0_time) < 5):
-        raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
+    # if (len(phase_0_time) < 5):
+    #     raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
 
-    phase_0_speed = max_slope(phase_0_time, phase_0_voltage)
+    # phase_0_speed = max_slope(phase_0_time, phase_0_voltage)
 
-    return 1000 * phase_4_speed, phase_0_speed
+    return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
 
 def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
