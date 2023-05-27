@@ -68,7 +68,12 @@ def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offs
     phase_0_start_indices = np.insert(candidate_phase_0_start_indices[1:][diff_candidates > refractory_period], 0, candidate_phase_0_start_indices[0])
 
     action_potentials = []
+    last_end_time = None
     for i, start_index in enumerate(phase_0_start_indices):
+        start_time = time[start_index]
+        if last_end_time is not None and (start_time - last_end_time) < refractory_period:
+            continue
+
         pre_start_index = action_potentials[-1]['end'] if i > 0 else 0
 
         if i < len(phase_0_start_indices) - 1:
@@ -86,14 +91,17 @@ def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offs
             'end': end_index
         })
 
+        last_end_time = time[end_index]
+
     return action_potentials
+
 
 def max_slope(time, voltage):
     if len(time) != len(voltage):
         raise ValueError("time and voltage should be of the same length")
 
     if len(time) < 5:
-        raise ValueError("time and voltage should be at least of length 5")
+        raise ValueError(f"time and voltage should be at least of length 5 {time[0]}, {time[-1]}")
 
     max_slope = 0
     for i in range(2, len(time) - 2):
@@ -107,13 +115,22 @@ def find_voltage_speed(ap, time, voltage):
     prestart_index = ap['pre_start']
     start_index = ap['start']
     peak_index = ap['peak']
+    end_index = ap['end']
 
     phase_4_time = time[prestart_index:start_index]
     phase_4_voltage = voltage[prestart_index:start_index]
+
+    if (len(phase_4_time) < 5):
+        raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
+
     phase_4_speed = max_slope(phase_4_time, phase_4_voltage)
 
     phase_0_time = time[start_index:peak_index]
     phase_0_voltage = voltage[start_index:peak_index]
+
+    if (len(phase_0_time) < 5):
+        raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
+
     phase_0_speed = max_slope(phase_0_time, phase_0_voltage)
 
     return 1000 * phase_4_speed, phase_0_speed
@@ -171,22 +188,22 @@ def circle(time, voltage, avr_rad=1000):
         ma = nearest_value(dff[0], dff[1], x[np.argmax(y)], np.min(y))
 
     rad, x_r, y_r = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o], dff[1][ma - o])
-    k = 0
-    try:
-        while rad > avr_rad:
-            k += 1
-            ma -= 5
-            rad_new, x_r_new, y_r_new = radius(dff[0][ma], dff[1][ma], dff[0][ma + o], dff[1][ma + o], dff[0][ma - o],
-                                               dff[1][ma - o])
-            if k > 100:
-                break
-        if rad_new < rad:
-            return rad_new, x_r_new, y_r_new
-        else:
-            return rad, x_r, y_r
-
-    except Exception as e:
-        return rad, x_r, y_r
+    x = np.array(time)
+    y = np.array(voltage)
+    n = 1
+    while rad > avr_rad:
+        x = x[:int(len(y)/2**n)]
+        y = y[:int(len(y)/2**n)]
+        n+=1
+        ma1 = nearest_value(x, y, x[np.argmax(y)], np.min(y))
+        if ma1 + 1 < len(x):
+            rad, x_r, y_r = radius(x[ma1], y[ma1], x[ma1 + 1], y[ma1 + 1], x[ma1 - 1], y[ma1 - 1])
+        elif ma1 - 1 > 0:
+            ma1 -= 1
+            rad, x_r, y_r = radius(x[ma1], y[ma1], x[ma1 + 1], y[ma1 + 1], x[ma1 - 1], y[ma1 - 1])
+        if n > 4:
+            break
+    return rad, x_r, y_r
 
 def save_aps_to_txt(destination, aps, time, voltage):
     if os.path.exists(destination):
@@ -210,28 +227,14 @@ def save_aps_to_txt(destination, aps, time, voltage):
 
 def save_aps_to_xlsx(destination, aps, time, voltage, limit_rad=1000):
     data = []
-    radius_list_local = []
-    phase_4_speed_list_local = []
-    phase_0_speed_list_local = []
 
     for number, ap in enumerate(aps):
         phase_4_speed, phase_0_speed = find_voltage_speed(ap, time, voltage)
-
-        if math.isnan(phase_4_speed):
-            phase_4_speed = replace_nan_with_nearest(phase_4_speed_list_local, number)
-        if math.isnan(phase_0_speed):
-            phase_0_speed = replace_nan_with_nearest(phase_0_speed_list_local, number)
 
         current_ap_time = time[ap['pre_start']:ap['end']]
         current_ap_voltage = voltage[ap['pre_start']:ap['end']]
 
         radius, x, y = circle(current_ap_time, current_ap_voltage, limit_rad)
-
-        if math.isnan(radius):
-            radius = replace_nan_with_nearest(radius_list_local, number)
-
-        radius_list_local.append(radius)
-
 
         row = {
             "Номер ПД": number + 1,
