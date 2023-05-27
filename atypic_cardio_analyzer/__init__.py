@@ -88,6 +88,21 @@ def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offs
 
     return action_potentials
 
+def max_slope(time, voltage):
+    if len(time) != len(voltage):
+        raise ValueError("time and voltage should be of the same length")
+
+    if len(time) < 5:
+        raise ValueError("time and voltage should be at least of length 5")
+
+    max_slope = 0
+    for i in range(2, len(time) - 2):
+        # five-point linear regression
+        A = np.vstack([time[i-2:i+3], np.ones(5)]).T
+        m, c = np.linalg.lstsq(A, voltage[i-2:i+3], rcond=None)[0]
+        max_slope = max(max_slope, m)
+    return max_slope
+
 def find_voltage_speed(ap, time, voltage):
     prestart_index = ap['pre_start']
     start_index = ap['start']
@@ -95,16 +110,13 @@ def find_voltage_speed(ap, time, voltage):
 
     phase_4_time = time[prestart_index:start_index]
     phase_4_voltage = voltage[prestart_index:start_index]
-    phase_4_speed = np.diff(phase_4_voltage) / np.diff(phase_4_time)
+    phase_4_speed = max_slope(phase_4_time, phase_4_voltage)
 
     phase_0_time = time[start_index:peak_index]
     phase_0_voltage = voltage[start_index:peak_index]
-    phase_0_speed = np.diff(phase_0_voltage) / np.diff(phase_0_time)
+    phase_0_speed = max_slope(phase_0_time, phase_0_voltage)
 
-    try:
-        return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
-    except:
-        return 0.0, 0.0
+    return 1000 * phase_4_speed, phase_0_speed
 
 def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
