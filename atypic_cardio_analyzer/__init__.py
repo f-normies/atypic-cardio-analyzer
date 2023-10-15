@@ -13,11 +13,11 @@ import dask.dataframe as dd
 import openpyxl
 import os
 import shutil
+from scipy.signal import savgol_filter
 from scipy.ndimage import gaussian_filter
-from skimage.restoration import denoise_tv_chambolle
 from math import sqrt
 
-def open_txt(file, separator='\t', header=None):
+def open_txt(file, step=1, separator='\t', header=None):
     column_names = ['time', 'voltage']
     column_types = {'time': np.float64, 'voltage': np.float64}
     
@@ -31,20 +31,28 @@ def open_txt(file, separator='\t', header=None):
                        dtype=column_types)
 
     data = data.compute()
-    time = data['time'].values
-    voltage = data['voltage'].values
+    t = data['time'].values[::step]
+    v = data['voltage'].values[::step]
 
-    return time, voltage
+    return np.asanyarray(t), np.asanyarray(v)
 
-def preprocess(file, step=1, sigma=5):
-    time, voltage = open_txt(file)
+def preprocess(file, time_factor=1000, voltage_factor=1000, step=1, window=51, polyorder=3):
+    t, v = open_txt(file, step=step)
 
-    time = time[::step] * 1000
-    voltage = voltage[::step] * 1000
-    voltage = gaussian_filter(voltage, sigma=sigma)
+    t = t * time_factor
+    v = v * voltage_factor
+    v = savgol_filter(v, window, polyorder)
 
-    return time, voltage
+    return t, v
 
+def preprocess_opened(t, v, time_factor=1000, voltage_factor=1000, step=1, window=51, polyorder=3):
+    t = t[::step] * time_factor
+    v = v[::step] * voltage_factor
+    v = savgol_filter(v, window, polyorder)
+
+    return t, v
+
+#Legacy, will be deleted at release
 def replace_nan_with_nearest(value_list, index):
     left, right = index - 1, index + 1
 
@@ -59,7 +67,7 @@ def replace_nan_with_nearest(value_list, index):
     finally:
         return 0
 
-def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offset=0):
+def find_action_potentials(time, voltage, alpha=1.3, delta=0.005, refractory_period=28, offset=0):
     voltage_derivative = np.diff(voltage) / np.diff(time)
 
     candidate_phase_0_start_indices = np.where(voltage_derivative > alpha)[0]
@@ -79,10 +87,24 @@ def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offs
         if i < len(phase_0_start_indices) - 1:
             next_start_index = phase_0_start_indices[i + 1]
             peak_index = np.argmax(voltage[start_index:next_start_index]) + start_index
-            end_index = np.argmin(voltage[peak_index:next_start_index]) + peak_index
+
+            peak_to_next_start_voltage_derivative = np.diff(voltage[peak_index:next_start_index]) / np.diff(time[peak_index:next_start_index])
+            end_index_candidates = np.where((peak_to_next_start_voltage_derivative < delta) & (peak_to_next_start_voltage_derivative > 0))[0]
+
+            if end_index_candidates.size > 0:
+                end_index = end_index_candidates[0] + peak_index
+            else:
+                end_index = np.argmin(voltage[peak_index:next_start_index]) + peak_index
         else:
             peak_index = np.argmax(voltage[start_index:]) + start_index
-            end_index = np.argmin(voltage[peak_index:]) + peak_index
+
+            peak_to_end_voltage_derivative = np.diff(voltage[peak_index:]) / np.diff(time[peak_index:])
+            end_index_candidates = np.where((peak_to_end_voltage_derivative < delta) & (peak_to_end_voltage_derivative > 0))[0]
+
+            if end_index_candidates.size > 0:
+                end_index = end_index_candidates[0] + peak_index
+            else:
+                end_index = np.argmin(voltage[peak_index:]) + peak_index
 
         action_potentials.append({
             'pre_start': pre_start_index,
@@ -95,22 +117,6 @@ def find_action_potentials(time, voltage, alpha=0.9, refractory_period=280, offs
 
     return action_potentials
 
-
-def max_slope(time, voltage):
-    if len(time) != len(voltage):
-        raise ValueError("time and voltage should be of the same length")
-
-    if len(time) < 5:
-        raise ValueError(f"time and voltage should be at least of length 5 {time[0]}, {time[-1]}")
-
-    max_slope = 0
-    for i in range(2, len(time) - 2):
-        # five-point linear regression
-        A = np.vstack([time[i-2:i+3], np.ones(5)]).T
-        m, c = np.linalg.lstsq(A, voltage[i-2:i+3], rcond=None)[0]
-        max_slope = max(max_slope, m)
-    return max_slope
-
 def find_voltage_speed(ap, time, voltage):
     prestart_index = ap['pre_start']
     start_index = ap['start']
@@ -121,21 +127,11 @@ def find_voltage_speed(ap, time, voltage):
     phase_4_voltage = voltage[prestart_index:start_index]
     phase_4_speed = np.diff(phase_4_voltage)/np.diff(phase_4_time)
 
-    # if (len(phase_4_time) < 5):
-    #     raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
-
-    # phase_4_speed = max_slope(phase_4_time, phase_4_voltage)
-
     phase_0_time = time[start_index:peak_index]
     phase_0_voltage = voltage[start_index:peak_index]
     phase_0_speed = np.diff(phase_0_voltage)/np.diff(phase_0_time)
 
-    # if (len(phase_0_time) < 5):
-    #     raise ValueError(f"{prestart_index}, {start_index}, {peak_index}, {end_index}")
-
-    # phase_0_speed = max_slope(phase_0_time, phase_0_voltage)
-
-    return 1000 * np.max(phase_4_speed), np.max(phase_0_speed)
+    return np.average(phase_4_speed), np.max(phase_0_speed)
 
 def circle(time, voltage, avr_rad=1000):
     def nearest_value(items_x, items_y, value_x, value_y):
@@ -227,11 +223,14 @@ def save_aps_to_txt(destination, aps, time, voltage):
 
     return time_intervals
 
-def save_aps_to_xlsx(destination, aps, time, voltage, limit_rad=1000):
+def save_aps_to_xlsx(destination, aps, time, voltage, original_time=None, original_voltage=None, limit_rad=1000):
     data = []
 
     for number, ap in enumerate(aps):
-        phase_4_speed, phase_0_speed = find_voltage_speed(ap, time, voltage)
+        if original_time and original_voltage:
+            phase_4_speed, phase_0_speed = find_voltage_speed(ap, original_time, original_voltage)
+        else:
+            phase_4_speed, phase_0_speed = find_voltage_speed(ap, time, voltage)
 
         current_ap_time = time[ap['pre_start']:ap['end']]
         current_ap_voltage = voltage[ap['pre_start']:ap['end']]
