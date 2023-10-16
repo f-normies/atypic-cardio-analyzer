@@ -14,8 +14,8 @@ import openpyxl
 import os
 import shutil
 from scipy.signal import savgol_filter
-from scipy.ndimage import gaussian_filter
 from math import sqrt
+from multiprocessing import Pool
 
 def open_txt(file, step=1, separator='\t', header=None):
     column_names = ['time', 'voltage']
@@ -67,13 +67,24 @@ def replace_nan_with_nearest(value_list, index):
     finally:
         return 0
 
-def find_action_potentials(time, voltage, alpha=1.3, delta=0.005, refractory_period=28, offset=0):
+def adaptive_threshold(t, v, k=10):
+    voltage_derivative = np.diff(v) / np.diff(t)
+    normalized_derivative = (voltage_derivative - np.min(voltage_derivative)) / (np.max(voltage_derivative) - np.min(voltage_derivative))
+    median_derivative = np.median(normalized_derivative)
+    alpha = k * median_derivative
+    return alpha
+
+def find_action_potentials(time, voltage, alpha=1.3, beta=0.00035, beta_tolerance=0.00015, refractory_period=140, offset=0):
     voltage_derivative = np.diff(voltage) / np.diff(time)
 
     candidate_phase_0_start_indices = np.where(voltage_derivative > alpha)[0]
-    diff_candidates = np.diff(candidate_phase_0_start_indices)
+    time_diff_candidates = np.diff(time[candidate_phase_0_start_indices])
 
-    phase_0_start_indices = np.insert(candidate_phase_0_start_indices[1:][diff_candidates > refractory_period], 0, candidate_phase_0_start_indices[0])
+    phase_0_start_indices = [candidate_phase_0_start_indices[0]]
+    for i in range(1, len(candidate_phase_0_start_indices)):
+        if time_diff_candidates[i-1] > refractory_period:
+            phase_0_start_indices.append(candidate_phase_0_start_indices[i])
+    phase_0_start_indices = np.array(phase_0_start_indices)
 
     action_potentials = []
     last_end_time = None
@@ -89,7 +100,7 @@ def find_action_potentials(time, voltage, alpha=1.3, delta=0.005, refractory_per
             peak_index = np.argmax(voltage[start_index:next_start_index]) + start_index
 
             peak_to_next_start_voltage_derivative = np.diff(voltage[peak_index:next_start_index]) / np.diff(time[peak_index:next_start_index])
-            end_index_candidates = np.where((peak_to_next_start_voltage_derivative < delta) & (peak_to_next_start_voltage_derivative > 0))[0]
+            end_index_candidates = np.where((beta - beta_tolerance < peak_to_next_start_voltage_derivative) & (peak_to_next_start_voltage_derivative < beta + beta_tolerance))[0]
 
             if end_index_candidates.size > 0:
                 end_index = end_index_candidates[0] + peak_index
@@ -99,7 +110,7 @@ def find_action_potentials(time, voltage, alpha=1.3, delta=0.005, refractory_per
             peak_index = np.argmax(voltage[start_index:]) + start_index
 
             peak_to_end_voltage_derivative = np.diff(voltage[peak_index:]) / np.diff(time[peak_index:])
-            end_index_candidates = np.where((peak_to_end_voltage_derivative < delta) & (peak_to_end_voltage_derivative > 0))[0]
+            end_index_candidates = np.where((beta - beta_tolerance < peak_to_end_voltage_derivative) & (peak_to_end_voltage_derivative < beta + beta_tolerance))[0]
 
             if end_index_candidates.size > 0:
                 end_index = end_index_candidates[0] + peak_index
@@ -203,23 +214,31 @@ def circle(time, voltage, avr_rad=1000):
             break
     return rad, x_r, y_r
 
+def save_file(args):
+    number, current_time, current_voltage, destination = args
+    filename = os.path.join(destination, f"{number + 1}.txt")
+    
+    with open(filename, 'w') as f:
+        for t, v in zip(current_time, current_voltage):
+            f.write(f"{t}\t{v}\n")
+
 def save_aps_to_txt(destination, aps, time, voltage):
     if os.path.exists(destination):
         shutil.rmtree(destination)
-
     os.makedirs(destination)
 
     time_intervals = []
 
+    args = []
     for number, ap in enumerate(aps):
         current_time = time[ap['pre_start']:ap['end']]
         current_voltage = voltage[ap['pre_start']:ap['end']]
-
         time_intervals.append([current_time[0], current_time[-1]])
+        
+        args.append((number, current_time, current_voltage, destination))
 
-        data = np.column_stack((current_time, current_voltage))
-
-        np.savetxt(os.path.join(destination, f"{number + 1}.txt"), data, delimiter='\t')
+    with Pool() as pool:
+        pool.map(save_file, args)
 
     return time_intervals
 
