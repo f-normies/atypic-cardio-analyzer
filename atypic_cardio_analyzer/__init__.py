@@ -74,7 +74,19 @@ def adaptive_threshold(t, v, k=10):
     alpha = k * median_derivative
     return alpha
 
-def find_action_potentials(time, voltage, alpha=1.3, beta=0.00035, beta_tolerance=0.00015, refractory_period=140, offset=0):
+def estimate_refractory_period(t, v, alpha):
+    action_potentials = find_action_potentials(t, v, alpha=alpha, refractory_period=0)
+    
+    intervals = np.diff([ap['start'] for ap in action_potentials])
+    
+    counts, bin_edges = np.histogram(intervals, bins=50)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    threshold = np.max(counts) * 0.1
+    rise_index = np.where(counts > threshold)[0][0]
+    
+    return bin_centers[rise_index]
+
+def find_action_potentials(time, voltage, alpha=1.3, beta=0.0005, beta_tolerance=0.00025, refractory_period=60, offset=0):
     voltage_derivative = np.diff(voltage) / np.diff(time)
 
     candidate_phase_0_start_indices = np.where(voltage_derivative > alpha)[0]
